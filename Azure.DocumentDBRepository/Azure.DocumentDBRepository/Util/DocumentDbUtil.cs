@@ -2,6 +2,7 @@
 using Microsoft.Azure.Documents;
 using Microsoft.Azure.Documents.Client;
 using Microsoft.Azure.Documents.Client.TransientFaultHandling;
+using Microsoft.Azure.Documents.Partitioning;
 using Microsoft.Practices.EnterpriseLibrary.TransientFaultHandling;
 using System;
 using System.Collections.Generic;
@@ -21,9 +22,8 @@ namespace Azure.DocumentDBRepository.Util
         /// <returns></returns>
         public static async Task<IReliableReadWriteDocumentClient> CreateClient(string endpoint, string authKey, ConnectionPolicy connectionPolicy = null)
         {
-
             Uri endpointUri = new Uri(endpoint);
-            var client = new DocumentClient(endpointUri, authKey, connectionPolicy).AsReliable(new FixedInterval(15, TimeSpan.FromMilliseconds(100)));
+            var client = new DocumentClient(endpointUri, authKey, connectionPolicy).AsReliable(new FixedInterval(15, TimeSpan.FromMilliseconds(200)));
             await client.UnderlyingClient.OpenAsync();
             return client;
         }
@@ -51,7 +51,7 @@ namespace Azure.DocumentDBRepository.Util
         /// <param name="dbLink">The database link.</param>
         /// <param name="collectionId">The collection identifier.</param>
         /// <returns></returns>
-        public static async Task<DocumentCollection> GetOrCreateCollectionAsync(IReliableReadWriteDocumentClient Client, 
+        public static async Task<DocumentCollection> GetOrCreateCollectionAsync(IReliableReadWriteDocumentClient Client,
             Database db, string collectionId, DocumentCollectionSpec collectionSpec = null)
         {
             DocumentCollection collection = Client.CreateDocumentCollectionQuery(db.SelfLink).Where(c => c.Id == collectionId).ToArray().FirstOrDefault();
@@ -257,6 +257,15 @@ namespace Azure.DocumentDBRepository.Util
             }
 
             return collections;
+        }
+
+        public static IPartitionResolver CreateHashPartitionResolver(IReliableReadWriteDocumentClient client, Database db, 
+            Func<object, string> partitionKeyExtractor, IEnumerable<string> partitionCollectionsSelfLinks)
+        {
+            //note that the partition key property must be present for all documents
+            HashPartitionResolver hashResolver = new HashPartitionResolver((Func<object, string>) partitionKeyExtractor, partitionCollectionsSelfLinks);
+            client.UnderlyingClient.PartitionResolvers[db.SelfLink] = hashResolver;
+            return hashResolver;
         }
     }
 }

@@ -21,7 +21,7 @@ namespace Azure.DocumentDBRepository
         private string _databaseId;
         private string _collectionPrefix;
         private int _partitionCount = 0;
-        private Func<T, string> _partitionKeyExtractor;
+        private Func<object, string> _partitionKeyExtractor;
         private ConnectionPolicy _clientConnectionPolicy;
 
         public DocumentDBRepository(string endpoint, string authKey,
@@ -37,8 +37,7 @@ namespace Azure.DocumentDBRepository
             this._partitionKeyExtractor = partitionKeyExtractor != null ? partitionKeyExtractor : u => ((Document)u).Id;
             this._clientConnectionPolicy = clientConnectionPolicy;
 
-            //instantiate the partition resolver
-            var a = PartitionResolver;
+            this.Init();
         }
 
         #region Public Properties
@@ -103,13 +102,8 @@ namespace Azure.DocumentDBRepository
             {
                 if (_partitionResolver == null)
                 {
-                    //for starters, we are going to create a HashPartitionResolver using 
-                    //the Id property which is a property of the Document class.
-                    // This however adds a requirement that we generate an ID (guid) prior to inserting 
-                    // a new document
-                    HashPartitionResolver hashResolver = new HashPartitionResolver((Func<object, string>)_partitionKeyExtractor, PartitionCollectionsSelfLinks);
-                    Client.UnderlyingClient.PartitionResolvers[Database.SelfLink] = hashResolver;
-                    _partitionResolver = hashResolver;
+                    _partitionResolver = DocumentDbUtil.CreateHashPartitionResolver(Client, Database,
+                        _partitionKeyExtractor, PartitionCollectionsSelfLinks);
                 }
                 return _partitionResolver;
             }
@@ -117,9 +111,15 @@ namespace Azure.DocumentDBRepository
         #endregion
 
         #region CRUD Methods
+        /// <summary>
+        /// Gets the by identifier.
+        /// </summary>
+        /// <param name="id">The identifier.</param>
+        /// <param name="feedOptions">The feed options.</param>
+        /// <returns></returns>
         public T GetById(string id, FeedOptions feedOptions = null)
         {
-            T document = Activator.CreateInstance<T>();
+            T document = new T();
             document.Id = id;
             // This is essentially a test for the default key extractor - the document ID.
             // If this is the case we can extract the partition key and get away with a 
@@ -147,6 +147,66 @@ namespace Azure.DocumentDBRepository
         }
 
         /// <summary>
+        /// Creates a query based on the passed document's partition key values.
+        /// If the partition key values are known, this will result in a more efficient query,
+        /// i.e. only one collection will be queried for the desired records.
+        /// </summary>
+        /// <param name="partitionKeysDocument">A document object containing the partition key values.</param>
+        /// <param name="options">The options.</param>
+        /// <returns></returns>
+        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the document.</exception>
+        public IEnumerable<T> Get(object partitionKeysDocument, Func<T, bool> predicate, FeedOptions options = null)
+        {
+            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
+            if (partitionKey == null)
+            {
+                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
+            }
+
+            return Client.CreateDocumentQuery<T>(Database.SelfLink, options, partitionKey).Where(predicate);
+        }
+
+        /// <summary>
+        /// Creates a query based on the passed document's partition key values.
+        /// If the partition key values are known, this will result in a more efficient query,
+        /// i.e. only one collection will be queried for the desired records.
+        /// <param name="partitionKeysDocument">The partition keys document.</param>
+        /// <param name="spec">The spec.</param>
+        /// <param name="options">The options.</param>
+        /// <returns></returns>
+        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the partitionKeysDocument.</exception>
+        public IEnumerable<T> Get(object partitionKeysDocument, FeedOptions options = null)
+        {
+            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
+            if (partitionKey == null)
+            {
+                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
+            }
+
+            return Client.CreateDocumentQuery<T>(Database.SelfLink, options, partitionKey);
+        }
+
+        /// <summary>
+        /// Creates a query based on the passed document's partition key values.
+        /// If the partition key values are known, this will result in a more efficient query,
+        /// i.e. only one collection will be queried for the desired records.
+        /// <param name="partitionKeysDocument">The partition keys document.</param>
+        /// <param name="spec">The spec.</param>
+        /// <param name="options">The options.</param>
+        /// <returns></returns>
+        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the partitionKeysDocument.</exception>
+        public IEnumerable<T> Get(object partitionKeysDocument, SqlQuerySpec spec, FeedOptions options = null)
+        {
+            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
+            if (partitionKey == null)
+            {
+                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
+            }
+
+            return Client.CreateDocumentQuery<T>(Database.SelfLink, spec, options, partitionKey);
+        }
+
+        /// <summary>
         /// Executes a query using the specified predicate.
         /// </summary>
         /// <param name="predicate">The predicate.</param>
@@ -156,6 +216,7 @@ namespace Azure.DocumentDBRepository
         {
             var result = new List<T>();
 
+            //TODO: use parallelism
             //we will execute queries against all collections and return first found result
             foreach (var coll in PartitionCollectionsSelfLinks)
             {
@@ -177,6 +238,7 @@ namespace Azure.DocumentDBRepository
         {
             var result = new List<T>();
 
+            //TODO: use parallelism
             //we will execute queries against all collections and return first found result
             foreach (var coll in PartitionCollectionsSelfLinks)
             {
@@ -229,7 +291,22 @@ namespace Azure.DocumentDBRepository
             return false;
         }
 
-        public async Task<bool> DeleteAsync(string documentId)
+        public async Task<bool> DeleteAsync(string selfLink)
+        {
+            try
+            {
+                await Client.DeleteDocumentAsync(selfLink);
+                return true;
+            }
+            catch (Exception e)
+            {
+
+            }
+
+            return false;
+        }
+
+        public async Task<bool> DeleteByIdAsync(string documentId)
         {
             try
             {
@@ -239,7 +316,7 @@ namespace Azure.DocumentDBRepository
                     return false;
                 }
 
-                await Client.DeleteDocumentAsync(document.SelfLink);
+                await this.DeleteAsync(document.SelfLink);
                 return true;
             }
             catch (Exception e)
@@ -252,7 +329,13 @@ namespace Azure.DocumentDBRepository
         #endregion
 
         #region Private Methods
-
+        private void Init()
+        {
+            // Instantiate the partition resolver as if it is not instantiated on initialization, 
+            // queries and inserts will fail.
+            _partitionResolver = DocumentDbUtil.CreateHashPartitionResolver(Client, Database,
+                _partitionKeyExtractor, PartitionCollectionsSelfLinks);
+        }
         #endregion
     }
 }
