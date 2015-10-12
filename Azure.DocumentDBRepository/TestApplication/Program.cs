@@ -16,15 +16,16 @@ namespace TestApplication
     {
         static void Main(string[] args)
         {
-            string endpoint = "htest";
+            string endpoint = "test";
             string authKey = "test";
+
             var connectionPolicy = new Microsoft.Azure.Documents.Client.ConnectionPolicy()
                     {
                         ConnectionMode = Microsoft.Azure.Documents.Client.ConnectionMode.Direct,
                         ConnectionProtocol = Microsoft.Azure.Documents.Client.Protocol.Tcp
                     };
 
-            var repo = new DocumentDBRepository<TestDocument>(endpoint, authKey, 
+            var repo = new DocumentDBRepository<TestDocument>(endpoint, authKey,
                 "DataPointsReportsDatabase",
                 "TestRepo", 2, u => ((TestDocument)u).PartitionKey,
                     connectionPolicy);
@@ -42,7 +43,7 @@ namespace TestApplication
                     PartitionKey = (i % 4).ToString()
                 };
 
-                recordSelfLinks.Add( repo.InsertItemAsync(insert).Result.SelfLink);
+                recordSelfLinks.Add(repo.InsertItemAsync(insert).Result.SelfLink);
             }
             Console.WriteLine("50 records added with 4 partition keys.");
 
@@ -53,8 +54,7 @@ namespace TestApplication
             // We need to pass a predicate as well.
             // Otherwise we will get all records from the collection where
             // partitions with a value of "0" are assigned to by the partitioner.
-            var allRecordsByFirstPartition = repo.Get(new TestDocument() { PartitionKey = "0" }, 
-                x=> x.PartitionKey == "0").ToList();
+            var allRecordsByFirstPartition = repo.Get((x => x.PartitionKey == "0"), null, new TestDocument() { PartitionKey = "0" }).ToList();
             Console.WriteLine(string.Format("Number of records with partitionKey 0: {0}", allRecordsByFirstPartition.Count()));
 
             bool success = true;

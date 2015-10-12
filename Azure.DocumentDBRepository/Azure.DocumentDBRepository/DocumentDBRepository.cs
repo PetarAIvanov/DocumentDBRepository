@@ -147,73 +147,18 @@ namespace Azure.DocumentDBRepository
         }
 
         /// <summary>
-        /// Creates a query based on the passed document's partition key values.
-        /// If the partition key values are known, this will result in a more efficient query,
-        /// i.e. only one collection will be queried for the desired records.
-        /// </summary>
-        /// <param name="partitionKeysDocument">A document object containing the partition key values.</param>
-        /// <param name="options">The options.</param>
-        /// <returns></returns>
-        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the document.</exception>
-        public IEnumerable<T> Get(object partitionKeysDocument, Func<T, bool> predicate, FeedOptions options = null)
-        {
-            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
-            if (partitionKey == null)
-            {
-                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
-            }
-
-            return Client.CreateDocumentQuery<T>(Database.SelfLink, options, partitionKey).Where(predicate);
-        }
-
-        /// <summary>
-        /// Creates a query based on the passed document's partition key values.
-        /// If the partition key values are known, this will result in a more efficient query,
-        /// i.e. only one collection will be queried for the desired records.
-        /// <param name="partitionKeysDocument">The partition keys document.</param>
-        /// <param name="spec">The spec.</param>
-        /// <param name="options">The options.</param>
-        /// <returns></returns>
-        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the partitionKeysDocument.</exception>
-        public IEnumerable<T> Get(object partitionKeysDocument, FeedOptions options = null)
-        {
-            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
-            if (partitionKey == null)
-            {
-                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
-            }
-
-            return Client.CreateDocumentQuery<T>(Database.SelfLink, options, partitionKey);
-        }
-
-        /// <summary>
-        /// Creates a query based on the passed document's partition key values.
-        /// If the partition key values are known, this will result in a more efficient query,
-        /// i.e. only one collection will be queried for the desired records.
-        /// <param name="partitionKeysDocument">The partition keys document.</param>
-        /// <param name="spec">The spec.</param>
-        /// <param name="options">The options.</param>
-        /// <returns></returns>
-        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the partitionKeysDocument.</exception>
-        public IEnumerable<T> Get(object partitionKeysDocument, SqlQuerySpec spec, FeedOptions options = null)
-        {
-            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
-            if (partitionKey == null)
-            {
-                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
-            }
-
-            return Client.CreateDocumentQuery<T>(Database.SelfLink, spec, options, partitionKey);
-        }
-
-        /// <summary>
         /// Executes a query using the specified predicate.
         /// </summary>
         /// <param name="predicate">The predicate.</param>
         /// <param name="options">The options.</param>
         /// <returns></returns>
-        public IEnumerable<T> Get(Func<T, bool> predicate, FeedOptions options = null)
+        public IEnumerable<T> Get(Func<T, bool> predicate, FeedOptions options = null, object partitionKeyDocument = null)
         {
+            if (partitionKeyDocument != null)
+            {
+                return GetByParitionKey(partitionKeyDocument, predicate, options);
+            }
+
             var result = new List<T>();
 
             //TODO: use parallelism
@@ -234,8 +179,13 @@ namespace Azure.DocumentDBRepository
         /// <param name="spec">The spec.</param>
         /// <param name="options">The options.</param>
         /// <returns></returns>
-        public IEnumerable<T> Get(SqlQuerySpec spec, FeedOptions options = null)
+        public IEnumerable<T> Get(SqlQuerySpec spec, FeedOptions options = null, object partitionKeyDocument = null)
         {
+            if (partitionKeyDocument != null)
+            {
+                return this.GetByParitionKey(partitionKeyDocument, spec, options);
+            }
+
             var result = new List<T>();
 
             //TODO: use parallelism
@@ -335,6 +285,46 @@ namespace Azure.DocumentDBRepository
             // queries and inserts will fail.
             _partitionResolver = DocumentDbUtil.CreateHashPartitionResolver(Client, Database,
                 _partitionKeyExtractor, PartitionCollectionsSelfLinks);
+        }
+
+        /// <summary>
+        /// Creates a query based on the passed document's partition key values.
+        /// If the partition key values are known, this will result in a more efficient query,
+        /// i.e. only one collection will be queried for the desired records.
+        /// </summary>
+        /// <param name="partitionKeysDocument">A document object containing the partition key values.</param>
+        /// <param name="options">The options.</param>
+        /// <returns></returns>
+        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the document.</exception>
+        private IEnumerable<T> GetByParitionKey(object partitionKeysDocument, Func<T, bool> predicate, FeedOptions options = null)
+        {
+            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
+            if (partitionKey == null)
+            {
+                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
+            }
+
+            return Client.CreateDocumentQuery<T>(Database.SelfLink, options, partitionKey).Where(predicate);
+        }
+
+        /// <summary>
+        /// Creates a query based on the passed document's partition key values.
+        /// If the partition key values are known, this will result in a more efficient query,
+        /// i.e. only one collection will be queried for the desired records.
+        /// <param name="partitionKeysDocument">The partition keys document.</param>
+        /// <param name="spec">The spec.</param>
+        /// <param name="options">The options.</param>
+        /// <returns></returns>
+        /// <exception cref="System.ArgumentException">Invalid partition key field values passed for the partitionKeysDocument.</exception>
+        private IEnumerable<T> GetByParitionKey(object partitionKeysDocument, SqlQuerySpec spec, FeedOptions options = null)
+        {
+            var partitionKey = PartitionResolver.GetPartitionKey(partitionKeysDocument);
+            if (partitionKey == null)
+            {
+                throw new ArgumentException("Invalid partition key field values passed for the partitionKeysDocument.");
+            }
+
+            return Client.CreateDocumentQuery<T>(Database.SelfLink, spec, options, partitionKey);
         }
         #endregion
     }
